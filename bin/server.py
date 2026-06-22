@@ -18,22 +18,67 @@
 # May   28, 2026 - refined getSentencesWord
 # June   2, 2026 - removed getSentencesWord; too complicated
 # June   9, 2026 - after using a larger underneath model, restored getSentencesWord; kewl
+# June  17, 2026 - added additional local URLs
+# June  22, 2026 - added some refactoring bits as suggestet by an LLM; hmmm.
 
 
 # configure
-NAME	= 'Distant Reader MCP Server'
-LIBRARY = 'localLibrary'
-TXT	    = 'txt'
+NAME	 = 'Distant Reader MCP Server'
+LIBRARY  = 'localLibrary'
+TXT	     = 'txt'
+MODEL	 = 'locusai/multi-qa-minilm-l6-cos-v1'
+MAXIMUM  = 2048
 
 # require
 from json			    import loads
 from mcp.server.fastmcp import FastMCP
+from ollama	            import embed
+from pandas	            import DataFrame
+from sqlite_vec         import load
+from sqlite3	        import connect
 from struct			    import pack
 from typing			    import List, Literal
 import rdr
 
+
 # serializes a list of floats into a compact "raw bytes" format; makes things more efficient?
 def serialize( vector: List[float]) -> bytes : return pack( "%sf" % len( vector ), *vector )
+
+
+# normalize strings by replacing unicode hyphens with standard ascii hyphens
+def normalize( value: str ) -> str : return value.replace( '‑', '-' )
+
+
+# helper to fetch specific bibliographic fields to reduce code repetition
+def _fetch_bib_field( carrel: str, field: str ) -> str:
+	carrel   = normalize( carrel )
+	results  = []
+	try:
+		bibliography = loads( rdr.bibliography( carrel, format='json' ) )
+		for item in bibliography :
+			# ensure the ID is always present, and gracefully handle missing fields
+			entry = { 'id': item.get( 'id', 'unknown' ) }
+			entry[ field ] = item.get( field, 'Not available' )
+			results.append( entry )
+		return str( results )
+	except Exception as e:
+		return f"Error retrieving {field} from {carrel}: {str(e)}"
+
+
+# helper to construct and validate file URLs to reduce code repetition
+def _get_url( carrel: str, item: str, folder: str, extension: str ) -> str:
+	carrel = normalize( carrel )
+	item   = normalize( item )
+	try:
+		for record in loads( rdr.bibliography( carrel, format='json' ) ) :
+			if record[ 'id' ] == item :
+				if folder == rdr.CACHE : fullpath = 'file://' + str( library/carrel/folder/( item + record[ 'extension' ] ) )
+				else                   : fullpath = 'file://' + str( library/carrel/folder/( item + extension ) )
+				return fullpath
+		return "That item was not found, are you sure the identifier's value is correct?"
+	except Exception as e:
+		return f"Error retrieving URL: {str(e)}"
+
 
 # initailize
 server  = FastMCP( NAME, json_response=True, stateless_http=True )
@@ -53,19 +98,12 @@ def getSentencesWord( carrel:str, query:str ) -> str :
 			str: a new-line delimited list of sentences
 	"""
 
-	carrel = carrel.replace( '‑', '-' )
-	depth = len( rdr.concordance(carrel, localLibrary=None, query=query.lower()) )
+	carrel = normalize( carrel )
+	depth  = len( rdr.concordance(carrel, localLibrary=None, query=query.lower()) )
 	
 	DATABASE = 'sentences.db'
-	MAXIMUM  = 2048
 	COLUMNS  = [ 'item', 'idx', 'sentence' ]
-	SELECT   = "SELECT title AS 'item', idx, sentence, VEC_DISTANCE_L2(embedding, ?) AS distance FROM sentences ORDER BY distance LIMIT ?"
-	MODEL	= 'locusai/multi-qa-minilm-l6-cos-v1'
-	
-	from sqlite_vec import load
-	from sqlite3	import connect
-	from ollama	 import embed
-	from pandas	 import DataFrame
+	SELECT   = "SELECT title AS 'item', idx, sentence, VEC_DISTANCE_L2(embedding, ?) AS distance FROM sentences ORDER BY distance LIMIT ?"	
 
 	database = connect( rdr.configuration( LIBRARY )/carrel/(rdr.ETC)/DATABASE )
 	database.enable_load_extension( True )
@@ -79,8 +117,8 @@ def getSentencesWord( carrel:str, query:str ) -> str :
 	for index, record in enumerate( records ) :
 	
 		# parse
-		title	= record[ 0 ]
-		idx	 = record[ 1 ]
+		title	 = record[ 0 ]
+		idx	     = record[ 1 ]
 		sentence = record[ 2 ]
 		distance = record[ 3 ]
 		
@@ -93,7 +131,6 @@ def getSentencesWord( carrel:str, query:str ) -> str :
 	# create a dataframe of the sentences and sort by title
 	sentences = DataFrame( sentences, columns=COLUMNS )
 	return( sentences.to_json( orient='index' ) )
-	#return( str( type( depth ) ) )
 
 @server.prompt()
 def p_getSentencesWord( carrel:str, query:str ) :
@@ -112,7 +149,7 @@ def getPronouns( carrel: str ) -> str:
 		Returns: 
 			str: a tab-delinmited list of pronouns from the given carrel
 	'''
-	carrel     = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	adjectives = rdr.pos(carrel, select='lemma', like='PRON', count=True ).splitlines()
 	segment    = len( adjectives ) // 4
 	return( str( adjectives[ :segment ] ) )
@@ -134,7 +171,7 @@ def getAdjectives( carrel: str ) -> str:
 		Returns: 
 			str: a tab-delinmited list of adjectives from the given carrel
 	'''
-	carrel     = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	adjectives = rdr.pos(carrel, select='lemma', like='ADJ', count=True ).splitlines()
 	segment    = len( adjectives ) // 4
 	return( str( adjectives[ :segment ] ) )
@@ -148,31 +185,61 @@ def p_getAdjectives( carrel:str ) :
 ############## full path to origial document ##############
 
 @server.tool()
-def getFullPathToOriginalItem( carrel: str, item:str ) -> str:
+def getURLToOriginal( carrel: str, item:str ) -> str:
 	'''
-		Given the name of a carrel and an identifier in the carrel, output the full path to the item in its original form
+		Given the name of a carrel and an identifier in the carrel, output a local, file-based (file://) URL pointing to an item in the carrel. This is a bibliographic.
 		Args:
 			carrel (str): the name of a study carrel
-			item (str): an identifier
+			item (str): the name of an item in the study carrel
 		Returns: 
-			str: the full path to the original item in the given study carrel
+			str: a URL pointing to the original item in the study carrel
 	'''
-	carrel = carrel.replace( '‑', '-' )
-	item   = item.replace( '‑', '-' )
-	found  = False 
-	for record in loads( rdr.bibliography( carrel, format='json' ) ) :
-		if record[ 'id' ] == item :
-			fullpath = 'file://' + str( library/carrel/(rdr.CACHE)/( item + record[ 'extension' ] ) )
-			found	= True
-			break
-	
-	if found : return( fullpath )
-	else	 : return( "That item was not found, are you sure the identifier's value is correct?" )
+	return _get_url( carrel, item, rdr.CACHE, '' )
 
 @server.prompt()
 def p_getFullPathToOriginalItem( carrel:str, item: str ) :
 	'''The the full path to the original version of the given item in the given carrel'''
 	return( f'''Given the carrel named '{carrel}', return the full path to the original version of '{item}'.''' )
+
+
+############## full path to origial document ##############
+
+@server.tool()
+def getURLToHtm( carrel: str, item:str ) -> str:
+	'''
+		Given the name of a carrel and an identifier in the carrel, output a local, file-based (file://) URL pointing to an HTML version of the original item. This is a bibliographic.
+		Args:
+			carrel (str): the name of a study carrel
+			item (str): the name of an item in the study carrel
+		Returns: 
+			str: a URL pointing to an HTML version of the item in the study carrel
+	'''
+	return _get_url( carrel, item, 'htm', '.htm' )
+
+@server.prompt()
+def p_getURLToHtm( carrel:str, item: str ) :
+	'''The the full path to the HTML version of the given item in the given carrel'''
+	return( f'''Given the carrel named '{carrel}', return the URL to the HTML version of '{item}'.''' )
+
+
+############## full path to origial document ##############
+
+@server.tool()
+def getURLToTxt( carrel: str, item:str ) -> str:
+	'''
+		Given the name of a carrel and an identifier in the carrel, output a local, file-based (file://) URL pointing to the plain text version of the original item. This is a bibliographic.
+		Args:
+			carrel (str): the name of a study carrel
+			item (str): the name of an item in the study carrel
+		Returns: 
+			str: a URL pointing to a plain text version of the item in the study carrel
+	'''
+	return _get_url( carrel, item, TXT, '.txt' )
+
+@server.prompt()
+def p_getURLToTxt( carrel:str, item: str ) :
+	'''The the full path to plain text version of the given item in the given carrel'''
+	return( f'''Given the carrel named '{carrel}', return the URL to the plain text version of '{item}'.''' )
 
 
 ############## pos: verbs ##############
@@ -186,7 +253,7 @@ def getVerbs( carrel: str ) -> str:
 		Returns: 
 			str: a tab-delinmited list of lemmatized verbs form the given carrel
 	'''
-	carrel  = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	verbs   = rdr.pos(carrel, select='lemma', like='VERB', count=True )
 	segment = len( verbs ) // 4
 	return( str( verbs[ :segment ] ) )
@@ -208,11 +275,7 @@ def getTitles( carrel: str ) -> str:
 		Returns: 
 			str: a list of titles and the item identifiers from the given carrel
 	'''
-	KEYS   = [ 'id', 'title' ]
-	carrel = carrel.replace( '‑', '-' )
-	titles = []
-	for item in loads( rdr.bibliography( carrel, format='json' ) ) : titles.append( { key: item[ key ] for key in KEYS if key in item } )
-	return( str( titles ) )
+	return _fetch_bib_field( carrel, 'title' )
 
 @server.prompt()
 def p_getTitles( carrel:str ) :
@@ -231,11 +294,7 @@ def getAbstracts( carrel: str ) -> str:
 		Returns: 
 			str: a list of abstracts and the item identifiers from the given carrel
 	'''
-	KEYS      = [ 'id', 'summary' ]
-	carrel    = carrel.replace( '‑', '-' )
-	abstracts = []
-	for item in loads( rdr.bibliography( carrel, format='json' ) ) : abstracts.append( { 'abstract': item[ key ] for key in KEYS if key in item } )
-	return( str( abstracts ) )
+	return _fetch_bib_field( carrel, 'summary' )
 
 @server.prompt()
 def p_getAbstracts( carrel:str ) :
@@ -254,11 +313,7 @@ def getAuthors( carrel: str ) -> str:
 		Returns: 
 			str: a list of author names and the item identifiers from the given carrel
 	'''
-	KEYS    = [ 'id', 'author' ]
-	carrel  = carrel.replace( '‑', '-' )
-	authors = []
-	for item in loads( rdr.bibliography( carrel, format='json' ) ) : authors.append( { key: item[ key ] for key in KEYS if key in item } )
-	return( str( authors ) )
+	return _fetch_bib_field( carrel, 'author' )
 
 @server.prompt()
 def p_getAuthors( carrel:str ) :
@@ -277,11 +332,7 @@ def getDates( carrel: str ) -> str:
 		Returns: 
 			str: a list of date and the item identifiers from the given carrel
 	'''
-	KEYS   = [ 'id', 'date' ]
-	carrel = carrel.replace( '‑', '-' )
-	dates  = []
-	for item in loads( rdr.bibliography( carrel, format='json' ) ) : dates.append( { key: item[ key ] for key in KEYS if key in item } )
-	return( str( dates ) )
+	return _fetch_bib_field( carrel, 'date' )
 
 @server.prompt()
 def p_getDates( carrel:str ) :
@@ -300,7 +351,7 @@ def getNouns( carrel: str ) -> str:
 		Returns: 
 			str: a tab-delinmited list of nouns from the given carrel
 	'''
-	carrel  = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	nouns   = rdr.pos(carrel, select='words', like='NOUN', count=True ).splitlines()
 	segment = len( nouns ) // 16
 	return( str( nouns[ :segment ] ) )
@@ -322,7 +373,7 @@ def getPeople( carrel: str ) -> str:
 		Returns: 
 			str: a tab-delinmited list of people form the given carrel
 	'''
-	carrel  = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	people  = rdr.entities (carrel, select='entity', like='PERSON', count=True ).splitlines()
 	segment = len( people ) // 8
 	return( str( people[ :segment ] ) )
@@ -344,7 +395,7 @@ def getOrganizations( carrel: str ) -> str:
 		Returns: 
 			str: a tab-delinmited list of organizations form the given carrel
 	'''
-	carrel        = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	organizations = rdr.entities (carrel, select='entity', like='ORG', count=True ).splitlines()
 	segment       = len( organizations ) // 2
 	return( str( organizations[ :segment ] ) )
@@ -366,7 +417,7 @@ def getPlaces( carrel: str ) -> str:
 		Returns: 
 			str: a tab-delinmited list of places form the given carrel
 	'''
-	carrel  = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	places  = rdr.entities (carrel, select='entity', like='GPE', count=True ).splitlines()
 	segment = len( places ) // 2
 	return( str( places[ :segment ] ) )
@@ -388,7 +439,7 @@ def getItems( carrel: str ) -> str:
 		Returns: 
 			str: a list of all the items's identifiers
 	'''
-	carrel = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	bibliography = loads( rdr.bibliography( carrel, format='json' ) )
 	return( str( [ item[ 'id' ] for item in bibliography ] ) )
 
@@ -410,7 +461,7 @@ def getPlaintext( carrel: str, item:str ) -> str:
 		Returns: 
 			str: the plain text of the given item
 	'''
-	carrel = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	item = item.replace( '‑', '-' )
 	with open( library /carrel/TXT/(item + '.txt' ) ) as handle : plaintext = handle.read()
 	return( plaintext )
@@ -433,7 +484,7 @@ def getKeywords( carrel:str ) -> str :
 		Returns:
 			str: a tab-delimited list of carrel keywords and their associated frequencies
 	"""
-	carrel = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	return( rdr.keywords( carrel, count=True ) )
 
 @server.prompt()
@@ -454,7 +505,7 @@ def getSemanticallySimilarWords( carrel:str, word:str, depth:int=16 ) -> str :
 		Returns:
 			str: a tab-delimited list of semantically similar words and their associated distance scores
 	"""
-	carrel = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	return( rdr.word2vec( carrel, type='similarity', query=word, topn=depth ) )
 
 @server.prompt()
@@ -474,7 +525,7 @@ def getUnigrams( carrel:str ) -> str :
 		Returns:
 			str: a list of the carrel's most frequent unigrams
 	"""
-	carrel   = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	unigrams = rdr.ngrams( carrel, size=1, count=True ).splitlines()
 	segment  = len( unigrams ) // 16
 	return( str( unigrams[ :segment ] ) )
@@ -496,7 +547,7 @@ def getBigrams( carrel:str ) -> str :
 		Returns:
 		str: a list of the carrel's most frequent bigrams
 	"""
-	carrel  = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	bigrams = rdr.ngrams( carrel, size=2, count=True ).splitlines()
 	segment = len( bigrams ) // 32
 	return( str( bigrams[ :segment ] ) )
@@ -535,7 +586,7 @@ def getBibliography( carrel: str ) -> str:
 		Returns:
 			str: a JSON stream including an identifier, author, title, date, summary, keywords, Flesch (readability) score, and number of words.
 	"""
-	carrel = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	return( rdr.bibliography( carrel, format='json' ) )
 
 @server.prompt()
@@ -555,7 +606,7 @@ def getSizeInWords( carrel:str ) -> int:
 		Returns:
 			int: a number denoting the size of the carrel measured in words
 	"""
-	carrel = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	return( rdr.extents( carrel, 'words' ) )
 
 @server.prompt()
@@ -575,7 +626,7 @@ def getSizeInItems( carrel:str ) -> int:
 		Returns:
 			int: a number denoting the size of the carrel measured in number of items
 	"""
-	carrel = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	return( rdr.extents( carrel, 'items' ) )
 
 @server.prompt()
@@ -595,7 +646,7 @@ def getSizeInFlesch( carrel:str ) -> int:
 		Returns:
 			int: the Flesch Readability Score for the given carrel
 	"""
-	carrel = carrel.replace( '‑', '-' )
+	carrel     = normalize( carrel )
 	return( rdr.extents( carrel, 'flesch' ) )
 
 @server.prompt()

@@ -88,7 +88,7 @@ library = rdr.configuration( LIBRARY )
 ############## words in sentences ##############
 
 @server.tool()
-def getSentencesWord( carrel:str, query:str ) -> str :
+def getSentences( carrel:str, query:str ) -> str :
 	"""
 		Output all sentences from the given carrel which contains or are semantically simlar to the given word . The resulting sentences are useful for sentences level analysis across the entire carrel.
 		Args:
@@ -495,7 +495,7 @@ def p_getKeywords( carrel:str ) :
 ############## semantically similar words ##############
 
 @server.tool()
-def getSemanticallySimilarWords( carrel:str, word:str, depth:int=16 ) -> str :
+def getSimilarWords( carrel:str, word:str, depth:int=16 ) -> str :
 	"""
 		Given the name of a study carrel and a word, outut the depth number of semantically similar words as well as their associated scores.
 		Args:
@@ -561,7 +561,7 @@ def p_getBigrams( carrel:str ) :
 ############## catalog ##############
 
 @server.tool()
-def getCatalog() -> str :
+def getCarrels() -> str :
 	"""
 		Output the list of study carrels available from the local library.
 		Returns:
@@ -570,7 +570,7 @@ def getCatalog() -> str :
 	return( rdr.catalog() )
 
 @server.prompt()
-def p_getCatalog() :
+def p_getCarrels() :
 	"""Get a list of the carrels available in the local library"""
 	return( f"""In the form of a paragraph, list the carrels available from the local library.""" )
 

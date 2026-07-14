@@ -20,30 +20,26 @@
 # June   9, 2026 - after using a larger underneath model, restored getSentencesWord; kewl
 # June  17, 2026 - added additional local URLs
 # June  22, 2026 - added some refactoring bits as suggestet by an LLM; hmmm.
-# July  14, 2026 - add save to a file; at the cabin
 
 
 # configure
-NAME	= 'Distant Reader MCP Server'
-LIBRARY = 'localLibrary'
-TXT	    = 'txt'
-MODEL   = 'locusai/multi-qa-minilm-l6-cos-v1'
-MAXIMUM = 4096
-HTML    = '/Users/eric/Desktop/reader-results.html'
-
+NAME	 = 'Distant Reader MCP Server'
+LIBRARY  = 'localLibrary'
+TXT	     = 'txt'
+MODEL	 = 'locusai/multi-qa-minilm-l6-cos-v1'
+MAXIMUM  = 4096
 
 # require
 from json			    import loads
 from mcp.server.fastmcp import FastMCP
 from ollama	            import embed
-from pandas	            import DataFrame, read_csv
+from pandas	            import DataFrame
 from sqlite_vec         import load
 from sqlite3	        import connect
 from struct			    import pack
 from typing			    import List, Literal
 from pathlib            import Path
 import rdr
-
 
 # serializes a list of floats into a compact "raw bytes" format; makes things more efficient?
 def serialize( vector: List[float]) -> bytes : return pack( "%sf" % len( vector ), *vector )
@@ -87,22 +83,6 @@ def _get_url( carrel: str, item: str, folder: str, extension: str ) -> str:
 # initailize
 server  = FastMCP( NAME, json_response=True, stateless_http=True )
 library = rdr.configuration( LIBRARY )
-
-
-
-############## save to file ##############
-
-@server.tool()
-def save_HTML( content: str ) -> str:
-    '''Save the given HTML to a file'''
-    
-    # try to do the work
-    try:
-        with open( HTML, "w", encoding="utf-8") as handle : handle.write( content )
-        return f"Successfully wrote {len(content)} characters to file://{HTML}"
-    
-    # alas
-    except Exception as error : return f"Error: {error}"
 
 
 ############## words in sentences ##############
@@ -677,36 +657,17 @@ def p_getSizeInFlesch( carrel:str ) :
 
 ############## resources, but I don't think they work ##############
 
-@server.resource( "tm://{carrel}/" )
+@server.resource( "tm://{carrel}/summary/" )
 def r_tm( carrel: str ) -> str:
-
-	TOPICMODEL  = 'etc/topic-model/keys.tsv'
-	COLUMNS     = [ 'labels', 'weights', 'features' ]
-	
-	# read and sort keys file
-	keys = read_csv( library/carrel/TOPICMODEL, sep='\t', names=COLUMNS )
-	keys.sort_values( by='weights', ascending=False, inplace=True )
-	
-	# create labels for each topic
-	labels = []
-	for index, row in keys.iterrows() :
-	
-		# parse
-		features = row[ 'features' ].split()
-	
-		# loop through each feature
-		for feature in features :
-	
-			# build the list, conditionally
-			if feature in labels : continue
-			labels.append( feature )
-			break
-	
-	# add the labels, rearrange (just for fun)
-	keys[ 'labels' ] = labels
-	keys = keys[ [ 'labels', 'weights', 'features' ] ]
-	
-	return( keys.to_csv( index=False ) )
+	'''
+		Given the name of a carrel, output the results of the topic modeling process in the form of a comma-separated values (CSV) file.
+		Args:
+			carrel (str): the name of a study carrel
+		Returns: 
+			str: a stream of CSV
+	'''
+	with open( ( rdr.configuration( LIBRARY ) )/carrel/(rdr.ETC)/( 'topics.csv' ) ) as handle : csv = handle.read()
+	return( csv )
 
 ############## resources, but I don't think they work ##############
 

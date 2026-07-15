@@ -29,7 +29,7 @@ LIBRARY = 'localLibrary'
 TXT	    = 'txt'
 MODEL   = 'locusai/multi-qa-minilm-l6-cos-v1'
 MAXIMUM = 4096
-HTML    = '/Users/eric/Desktop/reader-results.html'
+HTML    = 'reader-results.html'
 
 
 # require
@@ -95,11 +95,11 @@ library = rdr.configuration( LIBRARY )
 @server.tool()
 def save_HTML( content: str ) -> str:
     '''Save the given HTML to a file'''
-    
-    # try to do the work
+        
+    html = Path.cwd()/HTML
     try:
-        with open( HTML, "w", encoding="utf-8") as handle : handle.write( content )
-        return f"Successfully wrote {len(content)} characters to file://{HTML}"
+        with open( html, "w", encoding="utf-8") as handle : handle.write( content )
+        return f"Successfully wrote {len(content)} characters to file://{html}"
     
     # alas
     except Exception as error : return f"Error: {error}"

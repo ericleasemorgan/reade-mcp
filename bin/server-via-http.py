@@ -900,6 +900,6 @@ def r_readme( carrel: str ) -> str:
 # go
 if __name__ == "__main__" :
 
-	#server.run( transport="streamable-http" )
-	server.run( transport="stdio" )
+	server.run( transport="streamable-http" )
+	#server.run( transport="stdio" )
 

@@ -1,2 +1,0 @@
-[console_scripts]
-mcp-client = mcp_client.__main__:cli_main

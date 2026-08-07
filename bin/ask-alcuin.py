@@ -10,7 +10,7 @@
 
 
 # configure
-SERVER            = "/Users/eric/Documents/reader-mcp/bin/server.py"
+SERVER            = "/shared/reader-mcp/bin/server.py"
 MODEL             = 'glm-5.2:cloud'
 SYSTEMPROMPT      = "Results should be written in the third person. Return results as if they were written by a student attending a liberal arts college. Ask questions, sometimes, but not always. The model is working within a generative-AI system called a RAG, and therefore results are intended to be primarily drawn from the underlying MCP server; results drawn from outside the server are to be kept to a bare minimum. The model is intended to be used as an analysis tool not as an oracle. When citing sentences, include item and idx values. When citing items and/or sentences in HTML files, use getURLToOriginal to hyperlink the items and/or sentences back to the original item. Be sure to text-align:right a signature to the whole HTML file with the name/address of 'Eric Lease Morgan <eric_morgan@infomotions.com>'. If possible, give the HTML today's date."
 MAXIMUMITERATIONS = 12

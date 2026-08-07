@@ -28,7 +28,7 @@ NAME	= 'Distant Reader MCP Server'
 LIBRARY = 'localLibrary'
 TXT	    = 'txt'
 MODEL   = 'locusai/multi-qa-minilm-l6-cos-v1'
-MAXIMUM = 4096
+MAXIMUM = 128
 HTML    = 'reader-results.htm'
 INSTRUCTIONS = '''Use this server to interact with Distant Reader study carrels (think "data sets"), where study carrels are collections of narrative texts that have been indexed and modeled in a number of ways (bibliographically, parts-of-speech, named entities, keywords, ngrams, etc.) This server can be used to analzye a single study carrel, compare and contrast study different carrels, and even compare and contrast individual items from different study carrels. In short this server supplements the traditional reading process with distant reading techiques. Intended to be used by students, researchers, and scholars, this server is a tool designed to help with the problem of information overoad. This server was writtten by Eric Lease Morgan <eric_morgan@infomotions.com>'''
 
@@ -131,7 +131,7 @@ def getSentences( carrel:str, query:str ) -> str :
 
 	# vectorize query and search; get a set of matching records
 	query   = embed( model=MODEL, input=query ).model_dump( mode='json' )[ 'embeddings' ][ 0 ]
-	records = database.execute( SELECT, [ serialize( query ), 128 ] ).fetchall()
+	records = database.execute( SELECT, [ serialize( query ), MAXIMUM ] ).fetchall()
 
 	# process each record; create a list of sentences
 	sentences = []
